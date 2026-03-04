@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, CheckCircle2, Brain } from "lucide-react";
+import { Loader2, CheckCircle2, Brain, Eye } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { assessRisk } from "@/lib/groq";
+import { createCase } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 
 const riskBadgeClass: Record<string, string> = {
   critical: "bg-risk-critical text-risk-critical-foreground",
@@ -18,6 +22,9 @@ const riskBadgeClass: Record<string, string> = {
 };
 
 const Intake = () => {
+  const navigate = useNavigate();
+  const { toast } = useToast();
+
   const [clientCode] = useState(() => {
     const num = Math.floor(Math.random() * 900) + 100;
     return `CC-2026-${num}`;
@@ -30,42 +37,82 @@ const Intake = () => {
   const [coordinator, setCoordinator] = useState("");
   const [caseNotes, setCaseNotes] = useState("");
   const [assessing, setAssessing] = useState(false);
+  const [savedCaseId, setSavedCaseId] = useState<string | null>(null);
   const [result, setResult] = useState<null | {
     risk: string;
     rationale: string;
     actions: string[];
   }>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    document.title = "New Case Intake — CrisisCompass";
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!presentingIssue.trim()) return;
+
     setAssessing(true);
     setResult(null);
-    setTimeout(() => {
-      const risks = ["critical", "high", "moderate", "stable"];
-      const risk = urgency[0] >= 4 ? (crisisHistory ? "critical" : "high") : urgency[0] >= 3 ? "moderate" : "stable";
-      setResult({
-        risk,
-        rationale:
-          "AI analysis detected " +
-          (risk === "critical" || risk === "high"
-            ? "elevated distress markers including crisis history indicators, limited support infrastructure, and high self-reported urgency. Immediate coordinator review recommended."
-            : "moderate distress markers with adequate support systems. Standard follow-up protocol recommended."),
-        actions:
-          risk === "critical" || risk === "high"
-            ? [
-                "Schedule crisis assessment within 24 hours",
-                "Assign to senior coordinator for review",
-                "Prepare safety plan template",
-                "Notify clinical supervisor",
-              ]
-            : [
-                "Schedule standard intake follow-up within 1 week",
-                "Share coping resources packet",
-                "Add to group therapy waitlist if appropriate",
-              ],
+    setSavedCaseId(null);
+
+    let riskLevel: "critical" | "high" | "moderate" | "stable" = "moderate";
+    let rationale = "";
+    let actions: string[] = [];
+    let followUpDays = 7;
+
+    // 1. Call Groq AI
+    try {
+      const aiResult = await assessRisk({
+        presenting_issue: presentingIssue,
+        crisis_history: crisisHistory,
+        crisis_history_details: crisisDetails,
+        support_network: supportNetwork || "unknown",
+        urgency_self_report: urgency[0],
+        case_notes: caseNotes,
       });
-      setAssessing(false);
-    }, 2500);
+      riskLevel = aiResult.risk_level;
+      rationale = aiResult.risk_rationale;
+      actions = aiResult.recommended_actions;
+      followUpDays = aiResult.follow_up_days;
+    } catch {
+      toast({
+        title: "AI assessment unavailable",
+        description: "Case saved with moderate risk. Please review manually.",
+        variant: "destructive",
+      });
+      rationale = "AI assessment could not be completed. Please assess risk manually.";
+      actions = ["Review case manually", "Schedule follow-up", "Assign coordinator"];
+    }
+
+    setResult({ risk: riskLevel, rationale, actions });
+
+    // 2. Save to Supabase
+    const saved = await createCase({
+      client_code: clientCode,
+      presenting_issue: presentingIssue,
+      risk_level: riskLevel,
+      status: "new",
+      coordinator: coordinator || "Unassigned",
+      crisis_history: crisisHistory,
+      crisis_history_details: crisisDetails,
+      support_network: (supportNetwork as "none" | "limited" | "moderate" | "strong") || "limited",
+      urgency_self_report: urgency[0],
+      case_notes: caseNotes,
+      risk_rationale: rationale,
+      recommended_actions: JSON.stringify(actions),
+      follow_up_days: followUpDays,
+      created_at: new Date().toISOString(),
+    });
+
+    if (saved) {
+      setSavedCaseId(saved.id);
+      toast({ title: "Case saved successfully!" });
+    } else {
+      toast({ title: "Failed to save case to database", variant: "destructive" });
+    }
+
+    setAssessing(false);
   };
 
   return (
@@ -94,7 +141,7 @@ const Intake = () => {
             </div>
 
             <div className="space-y-2">
-              <Label>Presenting Issue</Label>
+              <Label>Presenting Issue *</Label>
               <Textarea
                 placeholder="Describe the client's primary presenting concern…"
                 value={presentingIssue}
@@ -191,6 +238,16 @@ const Intake = () => {
                 ))}
               </ul>
             </div>
+            {savedCaseId && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-2"
+                onClick={() => navigate(`/cases/${savedCaseId}`)}
+              >
+                <Eye className="w-4 h-4 mr-1" /> View Case
+              </Button>
+            )}
           </CardContent>
         </Card>
       )}
