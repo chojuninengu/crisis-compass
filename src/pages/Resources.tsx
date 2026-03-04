@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useState, useEffect } from "react";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -7,22 +7,42 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { mockResources, type Resource } from "@/data/mockData";
+import { Skeleton } from "@/components/ui/skeleton";
+import { getResources, addResource } from "@/lib/api";
+import type { Resource } from "@/lib/supabase";
 import { Plus } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
 const Resources = () => {
-  const [resources, setResources] = useState<Resource[]>(mockResources);
+  const { toast } = useToast();
+  const [resources, setResources] = useState<Resource[]>([]);
+  const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ name: "", category: "", contact: "", availability: "", notes: "" });
+  const [saving, setSaving] = useState(false);
 
-  const handleAdd = () => {
+  useEffect(() => {
+    document.title = "Resources — CrisisCompass";
+    (async () => {
+      const data = await getResources();
+      setResources(data ?? []);
+      setLoading(false);
+    })();
+  }, []);
+
+  const handleAdd = async () => {
     if (!form.name.trim()) return;
-    setResources((prev) => [
-      ...prev,
-      { ...form, id: `r-${Date.now()}` },
-    ]);
-    setForm({ name: "", category: "", contact: "", availability: "", notes: "" });
-    setOpen(false);
+    setSaving(true);
+    const created = await addResource(form);
+    if (created) {
+      setResources((prev) => [...prev, created]);
+      setForm({ name: "", category: "", contact: "", availability: "", notes: "" });
+      setOpen(false);
+      toast({ title: "Resource added!" });
+    } else {
+      toast({ title: "Failed to add resource", variant: "destructive" });
+    }
+    setSaving(false);
   };
 
   return (
@@ -44,7 +64,7 @@ const Resources = () => {
             </DialogHeader>
             <div className="space-y-4 pt-2">
               <div className="space-y-2">
-                <Label>Name</Label>
+                <Label>Name *</Label>
                 <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Resource name" />
               </div>
               <div className="space-y-2">
@@ -73,7 +93,9 @@ const Resources = () => {
                 <Label>Notes</Label>
                 <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Additional details" rows={2} />
               </div>
-              <Button onClick={handleAdd} className="w-full">Add Resource</Button>
+              <Button onClick={handleAdd} className="w-full" disabled={saving || !form.name.trim()}>
+                {saving ? "Saving…" : "Add Resource"}
+              </Button>
             </div>
           </DialogContent>
         </Dialog>
@@ -92,15 +114,33 @@ const Resources = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {resources.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell className="font-medium">{r.name}</TableCell>
-                  <TableCell>{r.category}</TableCell>
-                  <TableCell className="hidden md:table-cell">{r.contact}</TableCell>
-                  <TableCell className="hidden lg:table-cell">{r.availability}</TableCell>
-                  <TableCell className="hidden lg:table-cell text-muted-foreground">{r.notes}</TableCell>
+              {loading ? (
+                Array.from({ length: 4 }).map((_, i) => (
+                  <TableRow key={i}>
+                    <TableCell><Skeleton className="h-4 w-36" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                    <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-32" /></TableCell>
+                    <TableCell className="hidden lg:table-cell"><Skeleton className="h-4 w-20" /></TableCell>
+                    <TableCell className="hidden lg:table-cell"><Skeleton className="h-4 w-40" /></TableCell>
+                  </TableRow>
+                ))
+              ) : resources.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                    No resources yet. Add the first one!
+                  </TableCell>
                 </TableRow>
-              ))}
+              ) : (
+                resources.map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell className="font-medium">{r.name}</TableCell>
+                    <TableCell>{r.category}</TableCell>
+                    <TableCell className="hidden md:table-cell">{r.contact}</TableCell>
+                    <TableCell className="hidden lg:table-cell">{r.availability}</TableCell>
+                    <TableCell className="hidden lg:table-cell text-muted-foreground">{r.notes}</TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
         </CardContent>
