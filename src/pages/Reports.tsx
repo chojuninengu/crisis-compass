@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, Copy, Download } from "lucide-react";
+import { Loader2, Copy, Printer } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { getDashboardStats } from "@/lib/api";
+import { generateReport } from "@/lib/groq";
 
 const Reports = () => {
   const { toast } = useToast();
@@ -19,18 +21,54 @@ const Reports = () => {
     recommendations: string;
   }>(null);
 
-  const handleGenerate = () => {
+  useEffect(() => {
+    document.title = "Reports — CrisisCompass";
+  }, []);
+
+  const handleGenerate = async () => {
+    if (!orgName.trim() || !startDate || !endDate) {
+      toast({
+        title: "Missing required fields",
+        description: "Please fill in Organization Name, Start Date, and End Date.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setGenerating(true);
     setReport(null);
-    setTimeout(() => {
-      setReport({
-        executive: `${orgName || "Organization"} served 487 unique clients during the reporting period (${startDate || "2026-01-01"} to ${endDate || "2026-03-01"}). Case volume increased 12% compared to the previous quarter, with notable growth in adolescent referrals. Average time-to-first-contact was 2.3 business days, meeting the target benchmark of <3 days.`,
-        risk: `Risk distribution: 8% Critical, 15% High, 42% Moderate, 35% Stable. Critical cases decreased 3% from the prior period. The AI triage system flagged 94% of eventually-escalated cases at intake, with a false-positive rate of 11%. Top presenting issues: anxiety disorders (28%), depressive episodes (22%), substance use (15%).`,
-        outcomes: `Case resolution rate: 67% of cases opened during the period reached stable status or were successfully closed. Average case duration: 34 days. Client satisfaction scores averaged 4.2/5. 89% of high-risk clients received follow-up within the 48-hour target window.`,
-        recommendations: `1. Expand crisis intervention capacity — demand exceeded availability on 23% of critical-flag days. 2. Implement peer support program to address "limited support network" factor present in 41% of high-risk intakes. 3. Increase coordinator staffing ratio from 1:100 to 1:75 to reduce follow-up delays. 4. Continue AI triage integration with quarterly model review.`,
+
+    try {
+      const stats = await getDashboardStats();
+      const total = (stats?.totalActive ?? 0) + (stats?.closedThisMonth ?? 0);
+
+      const result = await generateReport({
+        org_name: orgName,
+        start_date: startDate,
+        end_date: endDate,
+        total_cases: total,
+        critical_count: 0,
+        high_count: stats?.criticalAndHigh ?? 0,
+        moderate_count: 0,
+        stable_count: 0,
+        closed_count: stats?.closedThisMonth ?? 0,
       });
+
+      setReport({
+        executive: result.executive_summary,
+        risk: result.risk_analysis,
+        outcomes: result.outcomes,
+        recommendations: result.recommendations,
+      });
+    } catch {
+      toast({
+        title: "Report generation failed",
+        description: "Groq AI could not generate the report. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
       setGenerating(false);
-    }, 2000);
+    }
   };
 
   const handleCopy = () => {
@@ -40,16 +78,8 @@ const Reports = () => {
     toast({ title: "Copied to clipboard" });
   };
 
-  const handleDownload = () => {
-    if (!report) return;
-    const text = `GRANT REPORT — ${orgName || "Organization"}\nPeriod: ${startDate} to ${endDate}\n\n== Executive Summary ==\n${report.executive}\n\n== Risk Analysis ==\n${report.risk}\n\n== Outcomes ==\n${report.outcomes}\n\n== Recommendations ==\n${report.recommendations}`;
-    const blob = new Blob([text], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "grant-report.txt";
-    a.click();
-    URL.revokeObjectURL(url);
+  const handlePrint = () => {
+    window.print();
   };
 
   return (
@@ -59,26 +89,26 @@ const Reports = () => {
         <p className="text-sm text-muted-foreground mt-1">Generate grant-ready reports with AI</p>
       </div>
 
-      <Card>
+      <Card className="no-print">
         <CardContent className="pt-6 space-y-4">
           <div className="space-y-2">
-            <Label>Organization Name</Label>
+            <Label>Organization Name *</Label>
             <Input placeholder="Your organization name" value={orgName} onChange={(e) => setOrgName(e.target.value)} />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>Start Date</Label>
+              <Label>Start Date *</Label>
               <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label>End Date</Label>
+              <Label>End Date *</Label>
               <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
             </div>
           </div>
           <Button onClick={handleGenerate} disabled={generating} className="w-full">
             {generating ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin mr-2" /> Generating Report…
+                <Loader2 className="w-4 h-4 animate-spin mr-2" /> Generating report with AI…
               </>
             ) : (
               "Generate Report"
@@ -88,19 +118,25 @@ const Reports = () => {
       </Card>
 
       {report && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
+        <Card id="print-report">
+          <CardHeader className="flex flex-row items-center justify-between no-print">
             <CardTitle className="text-base">Report Preview</CardTitle>
             <div className="flex gap-2">
               <Button size="sm" variant="outline" onClick={handleCopy}>
                 <Copy className="w-4 h-4 mr-1" /> Copy
               </Button>
-              <Button size="sm" variant="outline" onClick={handleDownload}>
-                <Download className="w-4 h-4 mr-1" /> Download
+              <Button size="sm" variant="outline" onClick={handlePrint}>
+                <Printer className="w-4 h-4 mr-1" /> Download PDF
               </Button>
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
+            <div className="print-header hidden">
+              <h1 className="text-xl font-bold">Grant Report — {orgName}</h1>
+              <p className="text-sm text-gray-600">
+                Period: {startDate} to {endDate}
+              </p>
+            </div>
             {[
               { title: "Executive Summary", content: report.executive },
               { title: "Risk Analysis", content: report.risk },
@@ -115,6 +151,17 @@ const Reports = () => {
           </CardContent>
         </Card>
       )}
+
+      {/* Print stylesheet */}
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          #print-report, #print-report * { visibility: visible; }
+          #print-report { position: absolute; left: 0; top: 0; width: 100%; }
+          .no-print { display: none !important; }
+          .print-header { display: block !important; margin-bottom: 1.5rem; }
+        }
+      `}</style>
     </div>
   );
 };
