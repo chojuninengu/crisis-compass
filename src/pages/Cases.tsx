@@ -1,13 +1,15 @@
-import { useState, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { mockCases, type RiskLevel, type CaseStatus } from "@/data/mockData";
-import { Search, Eye } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { getCases } from "@/lib/api";
+import type { Case } from "@/lib/supabase";
+import { Search, Eye, FileX } from "lucide-react";
 
 const riskBadgeClass: Record<string, string> = {
   critical: "bg-risk-critical text-risk-critical-foreground",
@@ -28,19 +30,28 @@ const Cases = () => {
   const [search, setSearch] = useState("");
   const [riskFilter, setRiskFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [cases, setCases] = useState<Case[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const filtered = useMemo(() => {
-    return mockCases.filter((c) => {
-      const matchSearch =
-        !search ||
-        c.client_code.toLowerCase().includes(search.toLowerCase()) ||
-        c.presenting_issue.toLowerCase().includes(search.toLowerCase()) ||
-        c.coordinator.toLowerCase().includes(search.toLowerCase());
-      const matchRisk = riskFilter === "all" || c.risk_level === riskFilter;
-      const matchStatus = statusFilter === "all" || c.status === statusFilter;
-      return matchSearch && matchRisk && matchStatus;
+  useEffect(() => {
+    document.title = "Cases — CrisisCompass";
+  }, []);
+
+  const fetchCases = useCallback(async () => {
+    setLoading(true);
+    const data = await getCases({
+      risk_level: riskFilter !== "all" ? riskFilter : undefined,
+      status: statusFilter !== "all" ? statusFilter : undefined,
+      search: search.trim() || undefined,
     });
+    setCases(data ?? []);
+    setLoading(false);
   }, [search, riskFilter, statusFilter]);
+
+  useEffect(() => {
+    const timer = setTimeout(fetchCases, 300);
+    return () => clearTimeout(timer);
+  }, [fetchCases]);
 
   return (
     <div className="space-y-6">
@@ -101,27 +112,44 @@ const Cases = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.length === 0 ? (
+              {loading ? (
+                Array.from({ length: 5 }).map((_, i) => (
+                  <TableRow key={i}>
+                    <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                    <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-52" /></TableCell>
+                    <TableCell><Skeleton className="h-5 w-16 rounded-full" /></TableCell>
+                    <TableCell><Skeleton className="h-5 w-16 rounded-full" /></TableCell>
+                    <TableCell className="hidden lg:table-cell"><Skeleton className="h-4 w-28" /></TableCell>
+                    <TableCell className="hidden lg:table-cell"><Skeleton className="h-4 w-20" /></TableCell>
+                    <TableCell><Skeleton className="h-8 w-8 rounded" /></TableCell>
+                  </TableRow>
+                ))
+              ) : cases.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                    No cases match your filters.
+                  <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
+                    <div className="flex flex-col items-center gap-3">
+                      <FileX className="w-10 h-10 opacity-30" />
+                      <p>No cases found. Try adjusting your filters.</p>
+                    </div>
                   </TableCell>
                 </TableRow>
               ) : (
-                filtered.map((c) => (
+                cases.map((c) => (
                   <TableRow key={c.id}>
                     <TableCell className="font-medium">{c.client_code}</TableCell>
                     <TableCell className="hidden md:table-cell max-w-[220px] truncate">
                       {c.presenting_issue}
                     </TableCell>
                     <TableCell>
-                      <Badge className={riskBadgeClass[c.risk_level]}>{c.risk_level}</Badge>
+                      <Badge className={riskBadgeClass[c.risk_level] ?? ""}>{c.risk_level}</Badge>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline" className={statusBadgeClass[c.status]}>{c.status}</Badge>
+                      <Badge variant="outline" className={statusBadgeClass[c.status] ?? ""}>{c.status}</Badge>
                     </TableCell>
                     <TableCell className="hidden lg:table-cell">{c.coordinator}</TableCell>
-                    <TableCell className="hidden lg:table-cell">{c.date}</TableCell>
+                    <TableCell className="hidden lg:table-cell">
+                      {c.created_at ? new Date(c.created_at).toLocaleDateString() : "—"}
+                    </TableCell>
                     <TableCell>
                       <Button size="sm" variant="ghost" onClick={() => navigate(`/cases/${c.id}`)}>
                         <Eye className="w-4 h-4" />
