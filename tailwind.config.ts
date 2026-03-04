@@ -52,12 +52,14 @@ export default {
           foreground: "hsl(var(--card-foreground))",
         },
         risk: {
+          critical: "hsl(var(--risk-critical))",
+          "critical-foreground": "hsl(var(--risk-critical-foreground))",
           high: "hsl(var(--risk-high))",
           "high-foreground": "hsl(var(--risk-high-foreground))",
-          medium: "hsl(var(--risk-medium))",
-          "medium-foreground": "hsl(var(--risk-medium-foreground))",
-          low: "hsl(var(--risk-low))",
-          "low-foreground": "hsl(var(--risk-low-foreground))",
+          moderate: "hsl(var(--risk-moderate))",
+          "moderate-foreground": "hsl(var(--risk-moderate-foreground))",
+          stable: "hsl(var(--risk-stable))",
+          "stable-foreground": "hsl(var(--risk-stable-foreground))",
         },
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",
